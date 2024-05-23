@@ -7,8 +7,11 @@ import (
 	nacosgroupv1alpha1 "nacos.io/nacos-operator/api/v1alpha1"
 	myErrors "nacos.io/nacos-operator/pkg/errors"
 	"nacos.io/nacos-operator/pkg/service/k8s"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+var operator_log = ctrl.Log.WithName("setup")
 
 type IOperatorClient interface {
 	IKindClient
@@ -47,22 +50,25 @@ func (c *OperatorClient) MakeEnsure(nacos *nacosgroupv1alpha1.Nacos) {
 		c.KindClient.EnsureConfigmap(nacos)
 		c.KindClient.EnsureStatefulset(nacos)
 		c.KindClient.EnsureService(nacos)
-		if nacos.Spec.Database.TypeDatabase == "mysql" && nacos.Spec.MysqlInitImage != "" {
-			c.KindClient.EnsureMysqlConfigMap(nacos)
-			c.KindClient.EnsureJob(nacos)
-		}
+		c.CreateDBCmAndJob(nacos)
 	case TYPE_CLUSTER:
 		c.KindClient.EnsureConfigmap(nacos)
 		c.KindClient.EnsureStatefulsetCluster(nacos)
 		c.KindClient.EnsureHeadlessServiceCluster(nacos)
 		c.KindClient.EnsureClientService(nacos)
-		if nacos.Spec.Database.TypeDatabase == "mysql" && nacos.Spec.MysqlInitImage != "" {
-			c.KindClient.EnsureMysqlConfigMap(nacos)
-			c.KindClient.EnsureJob(nacos)
-		}
+		c.CreateDBCmAndJob(nacos)
 	default:
 		panic(myErrors.New(myErrors.CODE_PARAMETER_ERROR, myErrors.MSG_PARAMETER_ERROT, "nacos.Spec.Type", nacos.Spec.Type))
 	}
+}
+
+// GenDBCmAndJob 生成创建DB configmap以及job
+func (c *OperatorClient) CreateDBCmAndJob(nacos *nacosgroupv1alpha1.Nacos) nacosgroupv1alpha1.Nacos {
+	if nacos.Spec.DBInitImage != "" {
+		c.KindClient.EnsureDBConfigMap(nacos)
+		c.KindClient.EnsureJob(nacos)
+	}
+	return nacosgroupv1alpha1.Nacos{}
 }
 
 func (c *OperatorClient) PreCheck(nacos *nacosgroupv1alpha1.Nacos) {

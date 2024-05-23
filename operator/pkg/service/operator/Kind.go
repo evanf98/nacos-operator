@@ -5,8 +5,10 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"nacos.io/nacos-operator/pkg/util/merge"
+	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
@@ -29,7 +31,10 @@ const RAFT_PORT = 7848
 const NEW_RAFT_PORT = 9848
 
 // 导入的sql文件名称
-const SQL_FILE_NAME = "nacos-mysql.sql"
+const (
+	MYSQL_FILE_NAME = "nacos-mysql.sql"
+	PGSQL_FILE_NAME = "nacos-postgresql.sql"
+)
 
 var initScrit = `array=(%s)
 succ = 0
@@ -113,7 +118,7 @@ func (e *KindClient) ValidationField(nacos *nacosgroupv1alpha1.Nacos) {
 
 	setDefaultValue := []func(nacos *nacosgroupv1alpha1.Nacos){
 		setDefaultNacosType,
-		setDefaultMysql,
+		setDB,
 		setDefaultCertification,
 	}
 
@@ -137,31 +142,6 @@ func setDefaultCertification(nacos *nacosgroupv1alpha1.Nacos) {
 		}
 		if nacos.Spec.Certification.TokenExpireSeconds == "" {
 			nacos.Spec.Certification.TokenExpireSeconds = "18000"
-		}
-	}
-}
-
-func setDefaultMysql(nacos *nacosgroupv1alpha1.Nacos) {
-	// 默认设置内置数据库
-	if nacos.Spec.Database.TypeDatabase == "" {
-		nacos.Spec.Database.TypeDatabase = "embedded"
-	}
-	// mysql设置默认值
-	if nacos.Spec.Database.TypeDatabase == "mysql" {
-		if nacos.Spec.Database.MysqlHost == "" {
-			nacos.Spec.Database.MysqlHost = "127.0.0.1"
-		}
-		if nacos.Spec.Database.MysqlUser == "" {
-			nacos.Spec.Database.MysqlUser = "root"
-		}
-		if nacos.Spec.Database.MysqlDb == "" {
-			nacos.Spec.Database.MysqlDb = "nacos"
-		}
-		if nacos.Spec.Database.MysqlPassword == "" {
-			nacos.Spec.Database.MysqlPassword = "123456"
-		}
-		if nacos.Spec.Database.MysqlPort == "" {
-			nacos.Spec.Database.MysqlPort = "3306"
 		}
 	}
 }
@@ -207,8 +187,8 @@ func (e *KindClient) EnsureConfigmap(nacos *nacosgroupv1alpha1.Nacos) {
 	}
 }
 
-func (e *KindClient) EnsureMysqlConfigMap(nacos *nacosgroupv1alpha1.Nacos) {
-	cm := e.buildMysqlConfigMap(nacos)
+func (e *KindClient) EnsureDBConfigMap(nacos *nacosgroupv1alpha1.Nacos) {
+	cm := e.buildDBConfigMap(nacos)
 	myErrors.EnsureNormal(e.k8sService.CreateIfNotExistsConfigMap(nacos.Namespace, cm))
 }
 
@@ -220,22 +200,27 @@ func (e *KindClient) EnsureJob(nacos *nacosgroupv1alpha1.Nacos) {
 }
 
 // buildSqlConfigMap 创建用于保存待导入的sql的configmap
-func (e *KindClient) buildMysqlConfigMap(nacos *nacosgroupv1alpha1.Nacos) *v1.ConfigMap {
+func (e *KindClient) buildDBConfigMap(nacos *nacosgroupv1alpha1.Nacos) *v1.ConfigMap {
 	labels := e.generateLabels(nacos.Name, NACOS)
 	labels = e.MergeLabels(nacos.Labels, labels)
 
 	// 创建ConfigMap用于保存sql语句
 	cm := &v1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      nacos.Name + "-mysql-sql-init",
+			Name:      nacos.Name + "-" + strings.ToLower(nacos.Spec.Database.TypeDatabase) + "-sql-init",
 			Namespace: nacos.Namespace,
 			Labels:    labels,
 		},
-
-		Data: map[string]string{
-			"SQL_SCRIPT": readSql(SQL_FILE_NAME),
-		},
 	}
+	switch nacos.Spec.Database.TypeDatabase {
+	case "mysql":
+		operator_log.Info("Using MySQL SQL script")
+		cm.Data = map[string]string{"SQL_SCRIPT": readSql(MYSQL_FILE_NAME)}
+	case "postgresql":
+		operator_log.Info("Using PostgreSQL SQL script")
+		cm.Data = map[string]string{"SQL_SCRIPT": readSql(PGSQL_FILE_NAME)}
+	}
+
 	myErrors.EnsureNormal(controllerutil.SetControllerReference(nacos, cm, e.scheme))
 	return cm
 }
@@ -243,137 +228,16 @@ func (e *KindClient) buildMysqlConfigMap(nacos *nacosgroupv1alpha1.Nacos) *v1.Co
 func (e *KindClient) buildJob(nacos *nacosgroupv1alpha1.Nacos) *batchv1.Job {
 	labels := e.generateLabels(nacos.Name, NACOS)
 	labels = e.MergeLabels(nacos.Labels, labels)
-
-	// 创建Job用于向数据库中导入sql
-	job := &batchv1.Job{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      nacos.Name + "-mysql-sql-init",
-			Namespace: nacos.Namespace,
-			Labels:    labels,
-		},
-		Spec: batchv1.JobSpec{
-			Template: v1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{
-					Namespace: nacos.Namespace,
-				},
-				Spec: v1.PodSpec{
-					InitContainers: []v1.Container{
-						{
-							Name:  "mysql-ping-database",
-							Image: nacos.Spec.MysqlInitImage,
-							Env: []v1.EnvVar{
-								{
-									Name:  "MYSQL_HOST",
-									Value: nacos.Spec.Database.MysqlHost,
-								},
-								{
-									Name:  "MYSQL_DB",
-									Value: nacos.Spec.Database.MysqlDb,
-								},
-								{
-									Name:  "MYSQL_PORT",
-									Value: nacos.Spec.Database.MysqlPort,
-								},
-								{
-									Name:  "MYSQL_USER",
-									Value: nacos.Spec.Database.MysqlUser,
-								},
-								{
-									Name:  "MYSQL_PASS",
-									Value: nacos.Spec.Database.MysqlPassword,
-								},
-							},
-							Command: []string{
-								"/bin/sh",
-								"-c",
-								"while ! mysqladmin ping --host=\"${MYSQL_HOST}\" --port=\"${MYSQL_PORT}\" --user=\"${MYSQL_USER}\" --password=\"${MYSQL_PASS}\" ; do echo \"check mysql\"; sleep 1; done",
-							},
-						},
-						{
-							Name:  "mysql-create-database",
-							Image: nacos.Spec.MysqlInitImage,
-							Env: []v1.EnvVar{
-								{
-									Name:  "MYSQL_HOST",
-									Value: nacos.Spec.Database.MysqlHost,
-								},
-								{
-									Name:  "MYSQL_DB",
-									Value: nacos.Spec.Database.MysqlDb,
-								},
-								{
-									Name:  "MYSQL_PORT",
-									Value: nacos.Spec.Database.MysqlPort,
-								},
-								{
-									Name:  "MYSQL_USER",
-									Value: nacos.Spec.Database.MysqlUser,
-								},
-								{
-									Name:  "MYSQL_PASS",
-									Value: nacos.Spec.Database.MysqlPassword,
-								},
-							},
-							// 判断数据库是否存在，不存在则创建
-							Command: []string{
-								"/bin/sh",
-								"-c",
-								"until mysql -u\"${MYSQL_USER}\" -p\"${MYSQL_PASS}\" -h\"${MYSQL_HOST}\" -P\"${MYSQL_PORT}\" -e\"create database if not exists \"${MYSQL_DB}\"\"; do echo waiting for database creation...; sleep 2; done;",
-							},
-						},
-					},
-					Containers: []v1.Container{
-						{
-							Name:  "mysql-sql-init",
-							Image: nacos.Spec.MysqlInitImage,
-							Env: []v1.EnvVar{
-								{
-									Name:  "MYSQL_HOST",
-									Value: nacos.Spec.Database.MysqlHost,
-								},
-								{
-									Name:  "MYSQL_DB",
-									Value: nacos.Spec.Database.MysqlDb,
-								},
-								{
-									Name:  "MYSQL_PORT",
-									Value: nacos.Spec.Database.MysqlPort,
-								},
-								{
-									Name:  "MYSQL_USER",
-									Value: nacos.Spec.Database.MysqlUser,
-								},
-								{
-									Name:  "MYSQL_PASS",
-									Value: nacos.Spec.Database.MysqlPassword,
-								},
-								{
-									Name: "SQL_SCRIPT",
-									ValueFrom: &v1.EnvVarSource{
-										ConfigMapKeyRef: &v1.ConfigMapKeySelector{
-											LocalObjectReference: v1.LocalObjectReference{
-												Name: nacos.Name + "-mysql-sql-init",
-											},
-											Key: "SQL_SCRIPT",
-										},
-									},
-									//Value: readSql(SQL_FILE_NAME),
-								},
-							},
-							// 导入nacos-mysql.sql中的数据
-							Command: []string{
-								"/bin/sh",
-								"-c",
-								"mysql -u\"${MYSQL_USER}\" -p\"${MYSQL_PASS}\" -h\"${MYSQL_HOST}\" -P\"${MYSQL_PORT}\" -D\"${MYSQL_DB}\" -e\"${SQL_SCRIPT}\";",
-							},
-						},
-					},
-					RestartPolicy: "Never",
-				},
-			},
-		},
+	job := &batchv1.Job{}
+	switch nacos.Spec.Database.TypeDatabase {
+	case "mysql":
+		operator_log.Info("Using MySQL Job")
+		job = CreateMySQLDbJob(nacos)
+	case "postgresql":
+		operator_log.Info("Using PostgreSQL Job")
+		job = CreatePgSQLDbJob(nacos)
 	}
-
+	job.ObjectMeta.Labels = labels
 	myErrors.EnsureNormal(controllerutil.SetControllerReference(nacos, job, e.scheme))
 	return job
 }
@@ -462,7 +326,7 @@ func (e *KindClient) buildClientService(nacos *nacosgroupv1alpha1.Nacos) *v1.Ser
 	//client-service提供双栈
 	var ipf = make([]v1.IPFamily, 0)
 	ipf = append(ipf, v1.IPv4Protocol)
-	ipf = append(ipf, v1.IPv6Protocol)
+	//ipf = append(ipf, v1.IPv6Protocol)
 	svc.Spec.IPFamilies = ipf
 	var ipPli = v1.IPFamilyPolicyPreferDualStack
 	svc.Spec.IPFamilyPolicy = &ipPli
@@ -533,27 +397,57 @@ func (e *KindClient) buildStatefulset(nacos *nacosgroupv1alpha1.Nacos) *appv1.St
 
 		env = append(env, v1.EnvVar{
 			Name:  "MYSQL_SERVICE_HOST",
-			Value: nacos.Spec.Database.MysqlHost,
+			Value: nacos.Spec.Database.DBHost,
 		})
 
 		env = append(env, v1.EnvVar{
 			Name:  "MYSQL_SERVICE_PORT",
-			Value: nacos.Spec.Database.MysqlPort,
+			Value: nacos.Spec.Database.DBPort,
 		})
 
 		env = append(env, v1.EnvVar{
 			Name:  "MYSQL_SERVICE_DB_NAME",
-			Value: nacos.Spec.Database.MysqlDb,
+			Value: nacos.Spec.Database.DBName,
 		})
 
 		env = append(env, v1.EnvVar{
 			Name:  "MYSQL_SERVICE_USER",
-			Value: nacos.Spec.Database.MysqlUser,
+			Value: nacos.Spec.Database.DBUser,
 		})
 
 		env = append(env, v1.EnvVar{
 			Name:  "MYSQL_SERVICE_PASSWORD",
-			Value: nacos.Spec.Database.MysqlPassword,
+			Value: nacos.Spec.Database.DBPassword,
+		})
+	} else if nacos.Spec.Database.TypeDatabase == "postgresql" {
+		env = append(env, v1.EnvVar{
+			Name:  "SPRING_DATASOURCE_PLATFORM",
+			Value: nacos.Spec.Database.TypeDatabase,
+		})
+
+		env = append(env, v1.EnvVar{
+			Name:  "PGSQL_SERVICE_HOST",
+			Value: nacos.Spec.Database.DBHost,
+		})
+
+		env = append(env, v1.EnvVar{
+			Name:  "PGSQL_SERVICE_PORT",
+			Value: nacos.Spec.Database.DBPort,
+		})
+
+		env = append(env, v1.EnvVar{
+			Name:  "PGSQL_SERVICE_DB_NAME",
+			Value: nacos.Spec.Database.DBName,
+		})
+
+		env = append(env, v1.EnvVar{
+			Name:  "PGSQL_SERVICE_USER",
+			Value: nacos.Spec.Database.DBUser,
+		})
+
+		env = append(env, v1.EnvVar{
+			Name:  "PGSQL_SERVICE_PASSWORD",
+			Value: nacos.Spec.Database.DBPassword,
 		})
 	}
 
@@ -681,6 +575,26 @@ func (e *KindClient) buildStatefulset(nacos *nacosgroupv1alpha1.Nacos) *appv1.St
 	//	ss.Spec.Template.Spec.Containers[0].ReadinessProbe = probe
 	//}
 
+	ss.Spec.Template.Spec.Volumes = append(ss.Spec.Template.Spec.Volumes, v1.Volume{
+		Name: "application-config",
+		VolumeSource: v1.VolumeSource{
+			ConfigMap: &v1.ConfigMapVolumeSource{
+				LocalObjectReference: v1.LocalObjectReference{Name: nacos.Name},
+				Items: []v1.KeyToPath{
+					{
+						Key:  "application.properties",
+						Path: "application.properties",
+					},
+				},
+			},
+		},
+	})
+	ss.Spec.Template.Spec.Containers[0].VolumeMounts = append(ss.Spec.Template.Spec.Containers[0].VolumeMounts, v1.VolumeMount{
+		Name:      "application-config",
+		MountPath: "/home/nacos/conf/application.properties",
+		SubPath:   "application.properties",
+	})
+
 	if nacos.Spec.Config != "" {
 		ss.Spec.Template.Spec.Volumes = append(ss.Spec.Template.Spec.Volumes, v1.Volume{
 			Name: "config",
@@ -704,44 +618,80 @@ func (e *KindClient) buildStatefulset(nacos *nacosgroupv1alpha1.Nacos) *appv1.St
 	}
 	myErrors.EnsureNormal(controllerutil.SetControllerReference(nacos, ss, e.scheme))
 
-	if nacos.Spec.Database.TypeDatabase == "mysql" && nacos.Spec.MysqlInitImage != "" {
+	if nacos.Spec.DBInitImage != "" {
 		ss = e.AddCheckDatabase(nacos, ss)
 	}
+
 	return ss
 }
 
 func (e *KindClient) AddCheckDatabase(nacos *nacosgroupv1alpha1.Nacos, sts *appv1.StatefulSet) *appv1.StatefulSet {
-	container := v1.Container{
-
-		Name:  "mysql-check-database",
-		Image: nacos.Spec.MysqlInitImage,
-		Env: []v1.EnvVar{
-			{
-				Name:  "MYSQL_HOST",
-				Value: nacos.Spec.Database.MysqlHost,
+	container := v1.Container{}
+	if nacos.Spec.Database.TypeDatabase == "mysql" {
+		container = v1.Container{
+			Name:  "mysql-check-database",
+			Image: nacos.Spec.DBInitImage,
+			Env: []v1.EnvVar{
+				{
+					Name:  "MYSQL_HOST",
+					Value: nacos.Spec.Database.DBHost,
+				},
+				{
+					Name:  "MYSQL_DB",
+					Value: nacos.Spec.Database.DBName,
+				},
+				{
+					Name:  "MYSQL_PORT",
+					Value: nacos.Spec.Database.DBPort,
+				},
+				{
+					Name:  "MYSQL_USER",
+					Value: nacos.Spec.Database.DBUser,
+				},
+				{
+					Name:  "MYSQL_PASS",
+					Value: nacos.Spec.Database.DBPassword,
+				},
 			},
-			{
-				Name:  "MYSQL_DB",
-				Value: nacos.Spec.Database.MysqlDb,
+			Command: []string{
+				"/bin/sh",
+				"-c",
+				"while ! mysqlcheck --host=\"${MYSQL_HOST}\" --port=\"${MYSQL_PORT}\" --user=\"${MYSQL_USER}\" --password=\"${MYSQL_PASS}\" --databases \"${MYSQL_DB}\" ; do sleep 1; done"},
+		}
+	} else if nacos.Spec.Database.TypeDatabase == "postgresql" {
+		container = v1.Container{
+			Name:  "pgsql-check-database",
+			Image: nacos.Spec.DBInitImage,
+			Env: []v1.EnvVar{
+				{
+					Name:  "PGSQL_HOST",
+					Value: nacos.Spec.Database.DBHost,
+				},
+				{
+					Name:  "PGSQL_DB",
+					Value: nacos.Spec.Database.DBName,
+				},
+				{
+					Name:  "PGSQL_PORT",
+					Value: nacos.Spec.Database.DBPort,
+				},
+				{
+					Name:  "PGSQL_USER",
+					Value: nacos.Spec.Database.DBUser,
+				},
+				{
+					Name:  "PGPASSWORD",
+					Value: nacos.Spec.Database.DBPassword,
+				},
 			},
-			{
-				Name:  "MYSQL_PORT",
-				Value: nacos.Spec.Database.MysqlPort,
+			Command: []string{
+				"/bin/sh",
+				"-c",
+				"while ! pg_isready -h \"${PGSQL_HOST}\" -p \"${PGSQL_PORT}\" -U \"${PGSQL_USER}\" -d postgres 2>&1 >> /dev/null; do echo \"check pgsql\"; sleep 1; done",
 			},
-			{
-				Name:  "MYSQL_USER",
-				Value: nacos.Spec.Database.MysqlUser,
-			},
-			{
-				Name:  "MYSQL_PASS",
-				Value: nacos.Spec.Database.MysqlPassword,
-			},
-		},
-		Command: []string{
-			"/bin/sh",
-			"-c",
-			"while ! mysqlcheck --host=\"${MYSQL_HOST}\" --port=\"${MYSQL_PORT}\" --user=\"${MYSQL_USER}\" --password=\"${MYSQL_PASS}\" --databases \"${MYSQL_DB}\" ; do sleep 1; done"},
+		}
 	}
+
 	sts.Spec.Template.Spec.InitContainers = append(sts.Spec.Template.Spec.InitContainers, container)
 	return sts
 }
@@ -752,27 +702,29 @@ func (e *KindClient) buildConfigMap(nacos *nacosgroupv1alpha1.Nacos) *v1.ConfigM
 	data := make(map[string]string)
 
 	data["custom.properties"] = nacos.Spec.Config
+	cm := e.buildDefaultConfigMap(nacos, data)
 
-	cm := v1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:        e.generateName(nacos),
-			Namespace:   nacos.Namespace,
-			Labels:      labels,
-			Annotations: nacos.Annotations,
-		},
-		Data: data,
-	}
-	myErrors.EnsureNormal(controllerutil.SetControllerReference(nacos, &cm, e.scheme))
-	return &cm
+	//cm := v1.ConfigMap{
+	//	ObjectMeta: metav1.ObjectMeta{
+	//		Name:        e.generateName(nacos),
+	//		Namespace:   nacos.Namespace,
+	//		Labels:      labels,
+	//		Annotations: nacos.Annotations,
+	//	},
+	//	Data: data,
+	//}
+	myErrors.EnsureNormal(controllerutil.SetControllerReference(nacos, cm, e.scheme))
+	return cm
 }
 
-func (e *KindClient) buildDefaultConfigMap(nacos *nacosgroupv1alpha1.Nacos) *v1.ConfigMap {
+func (e *KindClient) buildDefaultConfigMap(nacos *nacosgroupv1alpha1.Nacos, data map[string]string) *v1.ConfigMap {
 	labels := e.generateLabels(nacos.Name, NACOS)
 	labels = e.MergeLabels(nacos.Labels, labels)
-	data := make(map[string]string)
 
+	operator_log.Info("nacos.Spec.Database.TypeDatabase", nacos.Spec.Database.TypeDatabase)
 	// https://github.com/nacos-group/nacos-docker/blob/master/build/conf/application.properties
-	data["application.properties"] = `# spring
+	if nacos.Spec.Database.TypeDatabase == "mysql" {
+		data["application.properties"] = `# spring
 	server.servlet.contextPath=${SERVER_SERVLET_CONTEXTPATH:/nacos}
 	server.contextPath=/nacos
 	server.port=${NACOS_APPLICATION_PORT:8848}
@@ -804,7 +756,7 @@ func (e *KindClient) buildDefaultConfigMap(nacos *nacosgroupv1alpha1.Nacos) *v1.
 	server.tomcat.accesslog.enabled=${TOMCAT_ACCESSLOG_ENABLED:false}
 	server.tomcat.accesslog.pattern=%h %l %u %t "%r" %s %b %D
 	# default current work dir
-	server.tomcat.basedir=
+	server.tomcat.basedir=/
 	## spring security config
 	### turn off security
 	nacos.security.ignore.urls=${NACOS_SECURITY_IGNORE_URLS:/,/error,/**/*.css,/**/*.js,/**/*.html,/**/*.map,/**/*.svg,/**/*.png,/**/*.ico,/console-fe/public/**,/v1/auth/**,/v1/console/health/**,/actuator/**,/v1/console/server/**}
@@ -818,17 +770,68 @@ func (e *KindClient) buildDefaultConfigMap(nacos *nacosgroupv1alpha1.Nacos) *v1.
 	nacos.naming.distro.initDataRatio=0.9
 	nacos.naming.distro.syncRetryDelay=5000
 	nacos.naming.data.warmup=true`
+	} else if nacos.Spec.Database.TypeDatabase == "postgresql" {
+		data["application.properties"] = `# spring
+	server.servlet.contextPath=${SERVER_SERVLET_CONTEXTPATH:/nacos}
+	server.contextPath=/nacos
+	server.port=${NACOS_APPLICATION_PORT:8848}
+	spring.datasource.platform=${SPRING_DATASOURCE_PLATFORM:""}
+	nacos.cmdb.dumpTaskInterval=3600
+	nacos.cmdb.eventTaskInterval=10
+	nacos.cmdb.labelTaskInterval=300
+	nacos.cmdb.loadDataAtStart=false
+	db.pool.config.driverClassName=org.postgresql.Driver
+	db.num=${MYSQL_DATABASE_NUM:1}
+	db.url.0=jdbc:postgresql://${PGSQL_SERVICE_HOST}:${PGSQL_SERVICE_PORT:5432}/${PGSQL_SERVICE_DB_NAME}?AutoReconnect=true&TimeZone=Asia/Shanghai&tcpKeepAlive=true&charSet=UTF8
+	db.url.1=jdbc:postgresql://${PGSQL_SERVICE_HOST}:${PGSQL_SERVICE_PORT:5432}/${PGSQL_SERVICE_DB_NAME}?AutoReconnect=true&TimeZone=Asia/Shanghai&tcpKeepAlive=true&charSet=UTF8
+	db.user=${PGSQL_SERVICE_USER}
+	db.password=${PGSQL_SERVICE_PASSWORD}
+	### The auth system to use, currently only 'nacos' is supported:
+	nacos.core.auth.system.type=${NACOS_AUTH_SYSTEM_TYPE:nacos}
+	
+	
+	### The token expiration in seconds:
+	nacos.core.auth.default.token.expire.seconds=${NACOS_AUTH_TOKEN_EXPIRE_SECONDS:18000}
+	
+	### The default token:
+	nacos.core.auth.default.token.secret.key=${NACOS_AUTH_TOKEN:SecretKey012345678901234567890123456789012345678901234567890123456789}
+	
+	### Turn on/off caching of auth information. By turning on this switch, the update of auth information would have a 15 seconds delay.
+	nacos.core.auth.caching.enabled=${NACOS_AUTH_CACHE_ENABLE:false}
+	nacos.core.auth.enable.userAgentAuthWhite=${NACOS_AUTH_USER_AGENT_AUTH_WHITE_ENABLE:false}
+	nacos.core.auth.server.identity.key=${NACOS_AUTH_IDENTITY_KEY:serverIdentity}
+	nacos.core.auth.server.identity.value=${NACOS_AUTH_IDENTITY_VALUE:security}
+	server.tomcat.accesslog.enabled=${TOMCAT_ACCESSLOG_ENABLED:false}
+	server.tomcat.accesslog.pattern=%h %l %u %t "%r" %s %b %D
+	# default current work dir
+	server.tomcat.basedir=/
+	## spring security config
+	### turn off security
+	nacos.security.ignore.urls=${NACOS_SECURITY_IGNORE_URLS:/,/error,/**/*.css,/**/*.js,/**/*.html,/**/*.map,/**/*.svg,/**/*.png,/**/*.ico,/console-fe/public/**,/v1/auth/**,/v1/console/health/**,/actuator/**,/v1/console/server/**}
+	# metrics for elastic search
+	management.metrics.export.elastic.enabled=false
+	management.metrics.export.influx.enabled=false
+	
+	nacos.naming.distro.taskDispatchThreadCount=10
+	nacos.naming.distro.taskDispatchPeriod=200
+	nacos.naming.distro.batchSyncKeyCount=1000
+	nacos.naming.distro.initDataRatio=0.9
+	nacos.naming.distro.syncRetryDelay=5000
+	nacos.naming.data.warmup=true
+	`
+
+	}
 
 	cm := v1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        fmt.Sprintf("%s-default", e.generateName(nacos)),
+			Name:        e.generateName(nacos),
 			Namespace:   nacos.Namespace,
 			Labels:      labels,
 			Annotations: nacos.Annotations,
 		},
 		Data: data,
 	}
-	myErrors.EnsureNormal(controllerutil.SetControllerReference(nacos, &cm, e.scheme))
+	//myErrors.EnsureNormal(controllerutil.SetControllerReference(nacos, &cm, e.scheme))
 	return &cm
 }
 

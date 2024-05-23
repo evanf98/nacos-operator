@@ -27,6 +27,7 @@ FROM registry.cn-hangzhou.aliyuncs.com/shenkonghui/distroless-static:nonroot
 WORKDIR /
 COPY --from=builder /workspace/manager .
 COPY --from=builder /workspace/config/sql/nacos-mysql.sql config/sql/nacos-mysql.sql
+COPY --from=builder /workspace/config/sql/nacos-postgresql.sql config/sql/nacos-postgresql.sql
 USER nonroot:nonroot
 
 ENTRYPOINT ["/manager"]

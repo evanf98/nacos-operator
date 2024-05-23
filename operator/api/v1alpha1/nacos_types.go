@@ -41,7 +41,7 @@ type NacosSpec struct {
 	LivenessProbe  *v1.Probe               `json:"livenessProbe,omitempty" protobuf:"bytes,10,opt,name=livenessProbe"`
 	ReadinessProbe *v1.Probe               `json:"readinessProbe,omitempty" protobuf:"bytes,11,opt,name=readinessProbe"`
 	Env            []v1.EnvVar             `json:"env,omitempty" patchStrategy:"merge" patchMergeKey:"name" protobuf:"bytes,7,rep,name=env"`
-	MysqlInitImage string                  `json:"mysqlInitImage,omitempty"`
+	DBInitImage    string                  `json:"DBInitImage,omitempty"`
 
 	// 自定义配置
 	// 部署模式
@@ -89,12 +89,12 @@ type Storage struct {
 }
 
 type Database struct {
-	TypeDatabase  string `json:"type,omitempty" patchStrategy:"merge" patchMergeKey:"name" protobuf:"bytes,7,rep,name=type"`
-	MysqlHost     string `json:"mysqlHost,omitempty"`
-	MysqlPort     string `json:"mysqlPort,omitempty"`
-	MysqlDb       string `json:"mysqlDb,omitempty"`
-	MysqlUser     string `json:"mysqlUser,omitempty"`
-	MysqlPassword string `json:"mysqlPassword,omitempty"`
+	TypeDatabase string `json:"type,omitempty" patchStrategy:"merge" patchMergeKey:"name" protobuf:"bytes,7,rep,name=type"`
+	DBHost       string `json:"DBHost,omitempty"`
+	DBPort       string `json:"DBPort,omitempty"`
+	DBName       string `json:"DBName,omitempty"`
+	DBUser       string `json:"DBUser,omitempty"`
+	DBPassword   string `json:"DBPassword,omitempty"`
 }
 
 // NacosStatus defines the observed state of Nacos
