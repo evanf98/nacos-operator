@@ -5,7 +5,7 @@ metadata:
   namespace: nacos
 spec:
   type: cluster
-  image: mapper-node1:30001/nacos/nacos-server:v2.2.3
+  image: mapper-node1:30001/nacos/nacos-server:v2.2.3-pgsql
   replicas: 3
   resources:
     requests:
@@ -14,13 +14,13 @@ spec:
     limits:
       cpu: 1
       memory: 2Gi
-  DBInitImage: "mapper-node1:30001/mysql-client:10.2.15-r0"
+  DBInitImage: "mapper-node1:30001/psql:14.11"
   database:
-    type: mysql
-    DBHost: mysql-headless.nacos-cluster.svc.cluster.local
+    type: postgresql
+    DBHost: postgresql-hl.nacos.svc.cluster.local
     DBName: nacos
-    DBUser: root
-    DBPort: "3306"
+    DBUser: postgres
+    DBPort: "5432"
     DBPassword: "Abc!@#135"
   config: |
     management.endpoints.web.exposure.include=*

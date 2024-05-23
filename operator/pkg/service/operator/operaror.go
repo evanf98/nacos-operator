@@ -11,7 +11,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-var operator_log = ctrl.Log.WithName("setup")
+var operator_log = ctrl.Log.WithName("operator")
 
 type IOperatorClient interface {
 	IKindClient

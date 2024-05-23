@@ -2,6 +2,7 @@ package k8s
 
 import (
 	"context"
+
 	log "github.com/go-logr/logr"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -13,6 +14,7 @@ import (
 
 type Job interface {
 	GetJob(namespace string, name string) (*batchv1.Job, error)
+	CleanJob(namespace string, name string) error
 	CreateJob(namespace string, job *batchv1.Job) error
 	CreateIfNotExistsJob(namespace string, job *batchv1.Job) error
 }
@@ -36,6 +38,15 @@ func (s *JobService) GetJob(namespace string, name string) (*batchv1.Job, error)
 		return nil, err
 	}
 	return job, err
+}
+
+func (s *JobService) CleanJob(namespace, jobName string) error {
+	err := s.kubeClient.BatchV1().Jobs(namespace).Delete(context.TODO(), jobName, metav1.DeleteOptions{})
+	if err != nil {
+		return err
+	}
+	klog.V(2).Infof("delete job,namespace: %s  name: %s", namespace, jobName)
+	return nil
 }
 
 func (s *JobService) CreateJob(namespace string, job *batchv1.Job) error {
