@@ -55,19 +55,43 @@ func (c *CheckClient) CheckNacos(nacos *nacosgroupv1alpha1.Nacos, pods []corev1.
 	// 检查nacos是否访问通
 	for _, pod := range pods {
 		servers, err := c.nacosClient.GetClusterNodes(pod.Status.PodIP)
+
+		serversNum := len(servers.Servers)
+		serversV2 := nacosClient.ServersInfoV2{}
+		if len(servers.Servers) == 0 {
+			c.logger.V(0).Info("nacos might is v2,so try use v2 method.")
+			serversV2, err = c.nacosClient.GetClusterNodesV2(pod.Status.PodIP)
+			serversNum = len(serversV2.Data)
+		}
+
 		myErrors.EnsureNormalMyError(err, myErrors.CODE_CLUSTER_FAILE)
 		// 确保cr中实例个数和server数量相同
-		myErrors.EnsureEqual(len(servers.Servers), int(*nacos.Spec.Replicas), myErrors.CODE_CLUSTER_FAILE, "server num is not equal")
-		for _, svc := range servers.Servers {
-			myErrors.EnsureEqual(svc.State, "UP", myErrors.CODE_CLUSTER_FAILE, "node is not up")
-			if leader != "" {
-				// 确保每个节点leader相同
-				myErrors.EnsureEqual(leader, svc.ExtendInfo.RaftMetaData.MetaDataMap.NamingPersistentService.Leader,
-					myErrors.CODE_CLUSTER_FAILE, "leader not equal")
-			} else {
-				leader = svc.ExtendInfo.RaftMetaData.MetaDataMap.NamingPersistentService.Leader
+		myErrors.EnsureEqual(serversNum, int(*nacos.Spec.Replicas), myErrors.CODE_CLUSTER_FAILE, "server num is not equal")
+
+		if len(servers.Servers) != 0 {
+			for _, svc := range servers.Servers {
+				myErrors.EnsureEqual(svc.State, "UP", myErrors.CODE_CLUSTER_FAILE, "node is not up")
+				if leader != "" {
+					// 确保每个节点leader相同
+					myErrors.EnsureEqual(leader, svc.ExtendInfo.RaftMetaData.MetaDataMap.NamingPersistentService.Leader,
+						myErrors.CODE_CLUSTER_FAILE, "leader not equal")
+				} else {
+					leader = svc.ExtendInfo.RaftMetaData.MetaDataMap.NamingPersistentService.Leader
+				}
+				nacos.Status.Version = svc.ExtendInfo.Version
 			}
-			nacos.Status.Version = svc.ExtendInfo.Version
+		} else {
+			for _, svc := range serversV2.Data {
+				myErrors.EnsureEqual(svc.State, "UP", myErrors.CODE_CLUSTER_FAILE, "node is not up")
+				if leader != "" {
+					// 确保每个节点leader相同
+					myErrors.EnsureEqual(leader, svc.ExtendInfo.RaftMetaData.MetaDataMap.NamingPersistentService.Leader,
+						myErrors.CODE_CLUSTER_FAILE, "leader not equal")
+				} else {
+					leader = svc.ExtendInfo.RaftMetaData.MetaDataMap.NamingPersistentService.Leader
+				}
+				nacos.Status.Version = svc.ExtendInfo.Version
+			}
 		}
 
 		condition := nacosgroupv1alpha1.Condition{

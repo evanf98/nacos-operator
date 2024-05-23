@@ -201,6 +201,7 @@ func (e *KindClient) EnsureJob(nacos *nacosgroupv1alpha1.Nacos) {
 
 // buildSqlConfigMap 创建用于保存待导入的sql的configmap
 func (e *KindClient) buildDBConfigMap(nacos *nacosgroupv1alpha1.Nacos) *v1.ConfigMap {
+	operator_log.Info(fmt.Sprintf("buildCm: %s-configmap", nacos.Spec.Database.TypeDatabase))
 	labels := e.generateLabels(nacos.Name, NACOS)
 	labels = e.MergeLabels(nacos.Labels, labels)
 
@@ -214,10 +215,8 @@ func (e *KindClient) buildDBConfigMap(nacos *nacosgroupv1alpha1.Nacos) *v1.Confi
 	}
 	switch nacos.Spec.Database.TypeDatabase {
 	case "mysql":
-		operator_log.Info("Using MySQL SQL script")
 		cm.Data = map[string]string{"SQL_SCRIPT": readSql(MYSQL_FILE_NAME)}
 	case "postgresql":
-		operator_log.Info("Using PostgreSQL SQL script")
 		cm.Data = map[string]string{"SQL_SCRIPT": readSql(PGSQL_FILE_NAME)}
 	}
 
@@ -226,15 +225,14 @@ func (e *KindClient) buildDBConfigMap(nacos *nacosgroupv1alpha1.Nacos) *v1.Confi
 }
 
 func (e *KindClient) buildJob(nacos *nacosgroupv1alpha1.Nacos) *batchv1.Job {
+	operator_log.Info(fmt.Sprintf("buildJob: %s-job", nacos.Spec.Database.TypeDatabase))
 	labels := e.generateLabels(nacos.Name, NACOS)
 	labels = e.MergeLabels(nacos.Labels, labels)
 	job := &batchv1.Job{}
 	switch nacos.Spec.Database.TypeDatabase {
 	case "mysql":
-		operator_log.Info("Using MySQL Job")
 		job = CreateMySQLDbJob(nacos)
 	case "postgresql":
-		operator_log.Info("Using PostgreSQL Job")
 		job = CreatePgSQLDbJob(nacos)
 	}
 	job.ObjectMeta.Labels = labels
