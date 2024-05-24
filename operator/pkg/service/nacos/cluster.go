@@ -5,9 +5,20 @@ import (
 	"fmt"
 	"io"
 	"log"
+	nacosgroupv1alpha1 "nacos.io/nacos-operator/api/v1alpha1"
 	"net/http"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"strings"
 )
+
+const (
+	NacosV2ServersApi = "nacos/v2/core/cluster/node/list"
+	NacosV1ServersApi = "nacos/v1/ns/operator/servers"
+	NacosLoginApi     = "nacos/v1/auth/login"
+	NacosDefaultPass  = "nacos"
+)
+
+var cluster_log = ctrl.Log.WithValues("cluster")
 
 type INacosClient interface {
 }
@@ -41,16 +52,37 @@ type ServersInfo struct {
 	} `json:"servers"`
 }
 
-func (c *NacosClient) GetClusterNodes(ip string) (ServersInfo, error) {
+func (c *NacosClient) GetClusterNodes(ip string, nacos *nacosgroupv1alpha1.Nacos) (ServersInfo, error) {
 	servers := ServersInfo{}
 	//增加支持ipV6 pod状态探测
 	var resp *http.Response
+	var req *http.Request
 	var err error
+	client := c.httpClient
 
-	if strings.Contains(ip, ":") {
-		resp, err = c.httpClient.Get(fmt.Sprintf("http://[%s]:8848/nacos/v1/ns/operator/servers", ip))
-	} else {
-		resp, err = c.httpClient.Get(fmt.Sprintf("http://%s:8848/nacos/v1/ns/operator/servers", ip))
+	if nacos.Spec.Certification.Enabled { // 开启认证
+		cluster_log.Info("nacos v1 cluster nodes with auth", "ip", ip)
+		accessToken, err1 := c.GetNacosAccessToken(ip)
+		if err1 != nil {
+			return ServersInfo{}, err1
+		}
+		if strings.Contains(ip, ":") {
+			req, err = http.NewRequest("GET", fmt.Sprintf("http://[%s]:8848/%s?accessToken=%s", ip, NacosV1ServersApi, accessToken), nil)
+		} else {
+			req, err = http.NewRequest("GET", fmt.Sprintf("http://%s:8848/%s?accessToken=%s", ip, NacosV1ServersApi, accessToken), nil)
+		}
+	} else { // 非认证模式下
+		cluster_log.Info("nacos v1 cluster nodes without auth", "ip", ip)
+		if strings.Contains(ip, ":") {
+			req, err = http.NewRequest("GET", fmt.Sprintf("http://[%s]:8848/%s", ip, NacosV1ServersApi), nil)
+		} else {
+			req, err = http.NewRequest("GET", fmt.Sprintf("http://%s:8848/%s", ip, NacosV1ServersApi), nil)
+		}
+
+	}
+	resp, err = client.Do(req)
+	if err != nil {
+		return servers, err
 	}
 
 	if err != nil {
@@ -124,9 +156,38 @@ type ServersInfoV2 struct {
 	} `json:"data"`
 }
 
-func (c *NacosClient) GetClusterNodesV2(ip string) (ServersInfoV2, error) {
+func (c *NacosClient) GetClusterNodesV2(ip string, nacos *nacosgroupv1alpha1.Nacos) (ServersInfoV2, error) {
 	serversInfoV2 := ServersInfoV2{}
-	resp, err := c.httpClient.Get(fmt.Sprintf("http://%s:8848/nacos/v2/core/cluster/node/list", ip))
+	var resp *http.Response
+	var req *http.Request
+	var err error
+	client := c.httpClient
+
+	if err != nil {
+		return serversInfoV2, err
+	}
+	// todo: FIXME 默认账号密码，如自定义需获取
+	if nacos.Spec.Certification.Enabled { // 开启认证
+		cluster_log.Info("nacos v2 cluster nodes with auth", "ip", ip)
+		accessToken, err1 := c.GetNacosAccessToken(ip)
+		if err1 != nil {
+			return ServersInfoV2{}, err1
+		}
+		if strings.Contains(ip, ":") {
+			req, err = http.NewRequest("GET", fmt.Sprintf("http://[%s]:%d/%s?accessToken=%s", ip, 8848, NacosV2ServersApi, accessToken), nil)
+		} else {
+			req, err = http.NewRequest("GET", fmt.Sprintf("http://%s:%d/%s?accessToken=%s", ip, 8848, NacosV2ServersApi, accessToken), nil)
+		}
+	} else { // 非认证模式下
+		cluster_log.Info("nacos v2 cluster nodes without auth", "ip", ip)
+		if strings.Contains(ip, ":") {
+			req, err = http.NewRequest("GET", fmt.Sprintf("http://[%s]:%d/%s", ip, 8848, NacosV2ServersApi), nil)
+		} else {
+			req, err = http.NewRequest("GET", fmt.Sprintf("http://%s:%d/%s", ip, 8848, NacosV2ServersApi), nil)
+		}
+
+	}
+	resp, err = client.Do(req)
 	if err != nil {
 		return serversInfoV2, err
 	}
@@ -142,6 +203,34 @@ func (c *NacosClient) GetClusterNodesV2(ip string) (ServersInfoV2, error) {
 		return serversInfoV2, fmt.Errorf(fmt.Sprintf("instance: %s ; %s ;body: %v", ip, err.Error(), string(body)))
 	}
 	return serversInfoV2, nil
+}
+
+type AccessResp struct {
+	AccessToken string `json:"accessToken"`
+	TokenTTL    int    `json:"tokenTtl"`
+	GlobalAdmin bool   `json:"globalAdmin"`
+	Username    string `json:"username"`
+}
+
+func (c *NacosClient) GetNacosAccessToken(ip string) (string, error) {
+	accessResp := AccessResp{}
+	accessToken := ""
+	payload := strings.NewReader(fmt.Sprintf("username=nacos&password=%s", NacosDefaultPass))
+	resp, err := c.httpClient.Post(fmt.Sprintf("http://%s:8848/%s", ip, NacosLoginApi), "application/x-www-form-urlencoded", payload)
+	if err != nil {
+		return accessToken, err
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return accessToken, err
+	}
+	err = json.Unmarshal(body, &accessResp)
+	if err != nil {
+		fmt.Printf("%s\n", body)
+		return accessResp.AccessToken, fmt.Errorf(fmt.Sprintf("instance: %s ; %s ;body: %v", ip, err.Error(), string(body)))
+	}
+	accessToken = accessResp.AccessToken
+	return accessToken, nil
 }
 
 //func (c *CheckClient) getClusterNodesStaus(ip string) (bool, error) {

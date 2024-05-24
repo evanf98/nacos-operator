@@ -24,3 +24,5 @@ spec:
     DBPassword: "Abc!@#135"
   config: |
     management.endpoints.web.exposure.include=*
+  certification:
+    enabled: true

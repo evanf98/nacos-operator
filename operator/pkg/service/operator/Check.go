@@ -54,13 +54,14 @@ func (c *CheckClient) CheckNacos(nacos *nacosgroupv1alpha1.Nacos, pods []corev1.
 	nacos.Status.Conditions = []nacosgroupv1alpha1.Condition{}
 	// 检查nacos是否访问通
 	for _, pod := range pods {
-		servers, err := c.nacosClient.GetClusterNodes(pod.Status.PodIP)
+		// todo v1 版本开启认证后检测
+		servers, err := c.nacosClient.GetClusterNodes(pod.Status.PodIP, nacos)
 
 		serversNum := len(servers.Servers)
 		serversV2 := nacosClient.ServersInfoV2{}
 		if len(servers.Servers) == 0 {
 			c.logger.V(0).Info("nacos might is v2,so try use v2 method.")
-			serversV2, err = c.nacosClient.GetClusterNodesV2(pod.Status.PodIP)
+			serversV2, err = c.nacosClient.GetClusterNodesV2(pod.Status.PodIP, nacos)
 			serversNum = len(serversV2.Data)
 		}
 
