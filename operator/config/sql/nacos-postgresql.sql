@@ -367,7 +367,7 @@ CREATE TABLE "users" (
 -- Records of users
 -- ----------------------------
 BEGIN;
-INSERT INTO "users" VALUES ('nacos', '$2a$10$cqooAeQj1u8lPu4eapk7ne72KZPcbfQeWIDIoFVaaLp62hlhVIBRa', TRUE);
+INSERT INTO "users" VALUES ('nacos', '$2a$10$EuWPZHzz32dJN7jexM34MOeYirDdFAZm2kuWj7VEOJhhZkDrxfvUu', TRUE);
 COMMIT;
 
 -- ----------------------------

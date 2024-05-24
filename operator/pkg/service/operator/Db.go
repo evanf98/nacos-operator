@@ -260,7 +260,15 @@ func CreatePgSQLDbJob(nacos *nacosgroupv1alpha1.Nacos) (job *batchv1.Job) {
 							Command: []string{
 								"/bin/sh",
 								"-c",
-								"until psql -h \"${PGSQL_HOST}\" -p \"${PGSQL_PORT}\" -U \"${PGSQL_USER}\" -d postgres -c\"create database ${PGSQL_DB}\"; do echo waiting for database creation...; sleep 2; done;",
+								`
+psql -h "${PGSQL_HOST}" -p "${PGSQL_PORT}" -U "${PGSQL_USER}" -d postgres -c"select 1 from pg_database where datname='${PGSQL_DB}'" | grep -q 1
+if [[ $? == 0 ]];then
+	echo "${PGSQL_DB} exists, skip"
+else
+    psql -h "${PGSQL_HOST}" -p "${PGSQL_PORT}" -U "${PGSQL_USER}" -d postgres -c"create database ${PGSQL_DB}"
+fi
+`,
+								//"until psql -h \"${PGSQL_HOST}\" -p \"${PGSQL_PORT}\" -U \"${PGSQL_USER}\" -d postgres -c\"create database ${PGSQL_DB}\"; do echo waiting for database creation...; sleep 2; done;",
 							},
 						},
 					},

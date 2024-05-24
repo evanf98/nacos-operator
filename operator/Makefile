@@ -1,5 +1,5 @@
 # Current Operator version
-VERSION ?= 0.0.1
+VERSION ?= v2.2.3
 # Default bundle image tag
 BUNDLE_IMG ?= controller-bundle:$(VERSION)
 # Options for 'bundle-build'
@@ -12,7 +12,7 @@ endif
 BUNDLE_METADATA_OPTS ?= $(BUNDLE_CHANNELS) $(BUNDLE_DEFAULT_CHANNEL)
 
 # Image URL to use all building/pushing image targets
-IMG ?= controller:latest
+IMG ?= nacos-opeartor:${VERSION}
 # Produce CRDs that work back to Kubernetes 1.11 (no version conversion) if kubernetes 1.22 later please update CRD_OPTIONS ?= "crd:crdVersions=v1"
 CRD_OPTIONS ?= "crd:trivialVersions=true"
 
