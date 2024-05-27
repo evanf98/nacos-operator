@@ -18,7 +18,7 @@ const (
 	NacosDefaultPass  = "nacos"
 )
 
-var cluster_log = ctrl.Log.WithValues("cluster")
+var cluster_log = ctrl.Log.WithName("cluster")
 
 type INacosClient interface {
 }

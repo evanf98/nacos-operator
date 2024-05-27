@@ -86,10 +86,10 @@ func (c *CheckClient) CheckNacos(nacos *nacosgroupv1alpha1.Nacos, pods []corev1.
 				myErrors.EnsureEqual(svc.State, "UP", myErrors.CODE_CLUSTER_FAILE, "node is not up")
 				if leader != "" {
 					// 确保每个节点leader相同
-					myErrors.EnsureEqual(leader, svc.ExtendInfo.RaftMetaData.MetaDataMap.NamingPersistentService.Leader,
+					myErrors.EnsureEqual(leader, svc.ExtendInfo.RaftMetaData.MetaDataMap.NamingPersistentServiceV2.Leader,
 						myErrors.CODE_CLUSTER_FAILE, "leader not equal")
 				} else {
-					leader = svc.ExtendInfo.RaftMetaData.MetaDataMap.NamingPersistentService.Leader
+					leader = svc.ExtendInfo.RaftMetaData.MetaDataMap.NamingPersistentServiceV2.Leader
 				}
 				nacos.Status.Version = svc.ExtendInfo.Version
 			}
