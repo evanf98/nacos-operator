@@ -6,7 +6,7 @@ spec:
   # standalone/cluster
   type: {{ .Values.type}}
   image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
-  mysqlInitImage: {{ .Values.image.mysqlInitImage }}
+  DBInitImage: {{ .Values.image.DBInitImage }}
   enableEmbedded: {{ .Values.enableEmbedded }}
   replicas: {{ .Values.replicaCount}}
   {{- with .Values.nodeSelector }}
@@ -32,13 +32,11 @@ spec:
   {{-  if .Values.database }}
   database:
     type: {{ .Values.database.type}}
-    {{- if eq .Values.database.type "mysql"}}
-    mysqlHost: {{ .Values.database.mysqlHost}}
-    mysqlDb: {{ .Values.database.mysqlDb}}
-    mysqlUser: {{ .Values.database.mysqlUser}}
-    mysqlPort: "{{ .Values.database.mysqlPort}}"
-    mysqlPassword: "{{ .Values.database.mysqlPassword}}"
-    {{-  end }}
+    DBHost: {{ .Values.database.dbHost}}
+    DBName: {{ .Values.database.dbName}}
+    DBUser: {{ .Values.database.dbUser}}
+    DBPort: "{{ .Values.database.dbPort}}"
+    DBPassword: "{{ .Values.database.dbPassword}}"
   {{-  end }}
   {{-  if  eq .Values.volume.enabled true}}
   volume:

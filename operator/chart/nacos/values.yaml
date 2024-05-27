@@ -7,7 +7,7 @@ image:
   pullPolicy: IfNotPresent
   tag: "1.4.1"
   # mysql模式下需要自动创建数据库，非mysql不会生效
-  mysqlInitImage: registry.cn-hangzhou.aliyuncs.com/shenkonghui/mysql-client
+  DBInitImage: registry.cn-hangzhou.aliyuncs.com/shenkonghui/mysql-client
 
 imagePullSecrets: []
 nameOverride: ""
@@ -18,8 +18,15 @@ volume:
   storageSize: 1Gi
   storageClassName: default
 
+# database:
+#   type: embedded
 database:
-  type: embedded
+  type: mysql
+  dbHost: "mysql"
+  dbPort: 3306
+  dbUser: root
+  dbName: nacos
+  dbPassword: "Abc!@#135"
 
 resources:
   limits:
