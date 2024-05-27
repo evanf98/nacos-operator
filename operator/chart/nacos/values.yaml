@@ -5,9 +5,9 @@ replicaCount: 3
 image:
   repository: nacos/nacos-server
   pullPolicy: IfNotPresent
-  tag: "1.4.1"
+  tag: "v2.2.3"
   # mysql模式下需要自动创建数据库，非mysql不会生效
-  DBInitImage: registry.cn-hangzhou.aliyuncs.com/shenkonghui/mysql-client
+  DBInitImage: mysql/mysql-client:8.4.0
 
 imagePullSecrets: []
 nameOverride: ""
@@ -16,13 +16,13 @@ fullnameOverride: ""
 volume:
   enabled: true
   storageSize: 1Gi
-  storageClassName: default
+  storageClassName: local-path
 
 # database:
 #   type: embedded
 database:
   type: mysql
-  dbHost: "mysql"
+  dbHost: "mysql.db.svc.cluster.local"
   dbPort: 3306
   dbUser: root
   dbName: nacos
@@ -38,6 +38,9 @@ resources:
 
 config: |
   management.endpoints.web.exposure.include=*
+
+certification:
+    enabled: true
 
 nodeSelector: {}
 

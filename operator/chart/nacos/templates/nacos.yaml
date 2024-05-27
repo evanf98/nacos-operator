@@ -49,3 +49,7 @@ spec:
 {{- if .Values.config }}
 {{ .Values.config | indent 4 }}
 {{- end }}
+{{- if .Values.certification.enabled }}
+  certification:
+    enabled: true
+{{- end }}

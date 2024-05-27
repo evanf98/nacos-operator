@@ -650,15 +650,15 @@ spec:
                   type: string
                 database:
                   properties:
-                    mysqlDb:
+                    DBName:
                       type: string
-                    mysqlHost:
+                    DBHost:
                       type: string
-                    mysqlPassword:
+                    DBPassword:
                       type: string
-                    mysqlPort:
+                    DBPort:
                       type: string
-                    mysqlUser:
+                    DBUser:
                       type: string
                     type:
                       type: string
@@ -899,7 +899,7 @@ spec:
                       format: int32
                       type: integer
                   type: object
-                mysqlInitImage:
+                DBInitImage:
                   type: string
                 nodeSelector:
                   additionalProperties:
